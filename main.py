@@ -17,6 +17,7 @@ from utils import progress_bar
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
+parser.add_argument('--weight_decay', default=5e-4, type=float, help='learning rate')
 parser.add_argument('--load_path', default=None, type=str, help='load_path')
 parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_path')
 parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
@@ -89,8 +90,8 @@ if args.load_path is not None:
 
   criterion = nn.CrossEntropyLoss()
 
-  optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
-  scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[2, 4, 6], gamma=0.1)
+  optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
+  scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
 
 # Training for quantized model
