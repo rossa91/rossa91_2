@@ -51,7 +51,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 
 # Model
 print('==> Building model..')
-# net = VGG('VGG19')
+net = VGG('VGG9')
 # net = ResNet18()
 # net = PreActResNet18()
 # net = GoogLeNet()
@@ -64,7 +64,7 @@ print('==> Building model..')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-net = QVGG('VGG9', 4)
+# net = QVGG('VGG9', 4)
 
 net = net.to(device)
 if device == 'cuda':
@@ -90,7 +90,7 @@ if args.load_path is not None:
   criterion = nn.CrossEntropyLoss()
 
   optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
-  scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
+  scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[2, 4, 6], gamma=0.1)
 
 
 # Training for quantized model
@@ -130,8 +130,8 @@ def qtrain(epoch):
 
         save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
         torch.save(net.state_dict, save_name)
-
-    scheduler.step()
+   
+    
 
 
 # Training for normal 
@@ -142,7 +142,7 @@ def train(epoch):
     total = 0
 
 
-    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
+    print('\nEpoch: {}  lr : {:f}' .format(epoch+1, optimizer.param_groups[0]['lr']))
 
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
@@ -161,8 +161,7 @@ def train(epoch):
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-      
-    scheduler.step(epoch)
+  
               
 
 def test(epoch):
@@ -212,7 +211,9 @@ for epoch in range(start_epoch, start_epoch+350):
     qtrain(epoch)
   else:
     train(epoch)
+  scheduler.step()
   test(epoch)
+
 
 
 
