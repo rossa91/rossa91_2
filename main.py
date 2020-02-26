@@ -60,7 +60,9 @@ print('==> Building model..')
 # net = ShuffleNetG2()
 # net = SENet18()
 # net = ShuffleNetV2(1)
-net = EfficientNetB0()
+# net = EfficientNetB0()
+net = QVGG('VGG9', 4)
+
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -113,6 +115,14 @@ def train(epoch):
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        
+        print('Saving for traking....')
+        save_path = 'checkpoint/tracking'
+        if not os.path.isdir(save_path):
+            os.mkdir(save_path)
+
+        save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
+        torch.save(net.state_dict, save_name)
 
 def test(epoch):
     global best_acc
@@ -134,7 +144,7 @@ def test(epoch):
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
-    # Save checkpoint.
+    # Save best accuracy model
     acc = 100.*correct/total
     if acc > best_acc:
         print('Saving..')
@@ -149,6 +159,9 @@ def test(epoch):
         best_acc = acc
 
 
+
+
 for epoch in range(start_epoch, start_epoch+350):
     train(epoch)
     test(epoch)
+
