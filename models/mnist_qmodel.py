@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from quantize import *
+from module.quantize import *
 
 class QNet(nn.Module):
     def __init__(self):
