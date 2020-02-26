@@ -71,15 +71,6 @@ if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-if args.resume:
-    # Load checkpoint.
-    print('==> Resuming from checkpoint..')
-    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-    checkpoint = torch.load('./checkpoint/ckpt.pth')
-    net.load_state_dict(checkpoint['net'])
-    best_acc = checkpoint['acc']
-    start_epoch = checkpoint['epoch']
-
 # re-training
 if args.load_path is not None:
   print('==> load from checkpoint...')
@@ -133,13 +124,14 @@ def qtrain(epoch):
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        scheduler.step()
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
         
 
         save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
         torch.save(net.state_dict, save_name)
+
+    scheduler.step()
 
 
 # Training for normal 
@@ -168,9 +160,10 @@ def train(epoch):
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        scheduler.step()
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+      
+    scheduler.step()
               
 
 def test(epoch):
@@ -210,11 +203,17 @@ def test(epoch):
 
 
 
+if args.qtype == True:
+  print('qtrain mode')
+else:
+  print('normal train mode')
+
 for epoch in range(start_epoch, start_epoch+350):
   if args.qtype == True:
     qtrain(epoch)
   else:
     train(epoch)
   test(epoch)
+
 
 
