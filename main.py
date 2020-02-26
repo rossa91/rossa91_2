@@ -18,11 +18,13 @@ from utils import progress_bar
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='learning rate')
+parser.add_argument('--num_bits', default=4, type=int, help='quantization_bits')
 parser.add_argument('--load_path', default=None, type=str, help='load_path')
 parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_path')
 parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
 
 args = parser.parse_args()
+
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
@@ -52,6 +54,13 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 
 # Model
 print('==> Building model..')
+model = {}
+model['vgg9'] = VGG('VGG9')
+model['mobilenet'] = MobileNet()
+model['mobilenet_v2'] = MobileNetV2()
+model['qvgg9'] = QVGG('VGG9', args.num_bit)
+
+
 net = VGG('VGG9')
 # net = ResNet18()
 # net = PreActResNet18()
@@ -88,10 +97,10 @@ if args.load_path is not None:
 
   net.load_state_dict(load_ckpt, False)  
 
-  criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss()
 
-  optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
-  scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
+optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
+scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
 
 # Training for quantized model
