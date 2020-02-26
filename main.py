@@ -85,7 +85,6 @@ def train(epoch):
     total = 0
 
     
-    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
 
     if epoch < 150 : 
         optimizer = optim.SGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -96,6 +95,7 @@ def train(epoch):
     elif epoch <= 350 : 
         optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
 
+    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
 
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
