@@ -90,6 +90,7 @@ if args.load_path is not None:
   criterion = nn.CrossEntropyLoss()
 
   optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+  scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
 
 # Training for quantized model
@@ -99,7 +100,6 @@ def qtrain(epoch):
     correct = 0
     total = 0
 
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
     print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
     print('Saving for tracking....')
@@ -141,7 +141,6 @@ def train(epoch):
     correct = 0
     total = 0
 
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
     print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
 
@@ -163,7 +162,7 @@ def train(epoch):
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
       
-    scheduler.step()
+    scheduler.step(epoch)
               
 
 def test(epoch):
