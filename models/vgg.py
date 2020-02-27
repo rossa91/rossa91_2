@@ -17,7 +17,6 @@ class VGG(nn.Module):
         super(VGG, self).__init__()
         self.features = self._make_layers(cfg[vgg_name])
         self.classifier = nn.Linear(512, 10)
-        print('model name : ', vgg_name)
 
     def forward(self, x):
         out = self.features(x)
@@ -48,8 +47,6 @@ class QVGG(nn.Module):
         self.num_bits = num_bits
         self.features = self._make_layers(cfg[vgg_name])
         self.classifier = QLinear(512, 10, num_bits=self.num_bits, num_bits_weight=self.num_bits)
-        print('model name : ', 'Q'+vgg_name)
-        print('quantized bit : ', num_bits)
 
     def forward(self, x):
         out = self.features(x)

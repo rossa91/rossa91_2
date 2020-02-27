@@ -14,6 +14,12 @@ import argparse
 from models import *
 from utils import progress_bar
 
+model = {}
+model['vgg9'] = VGG('VGG9')
+model['mobilenet'] = MobileNet()
+model['mobilenet_v2'] = MobileNetV2()
+model['qvgg9'] = QVGG('VGG9', args.num_bit)
+
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -54,14 +60,9 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 
 # Model
 print('==> Building model..')
-model = {}
-model['vgg9'] = VGG('VGG9')
-model['mobilenet'] = MobileNet()
-model['mobilenet_v2'] = MobileNetV2()
-model['qvgg9'] = QVGG('VGG9', args.num_bit)
 
 
-net = VGG('VGG9')
+# net = VGG('VGG9')
 # net = ResNet18()
 # net = PreActResNet18()
 # net = GoogLeNet()
@@ -74,12 +75,16 @@ net = VGG('VGG9')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-# net = QVGG('VGG9', 4)
+net = QVGG('VGG9', args.num_bits)
 
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
+
+print('---- checkpoint path')
+if not os.path.isdir('checkpoint'):
+    os.mkdir('checkpoint')
 
 # re-training
 if args.load_path is not None:
@@ -203,11 +208,12 @@ def test(epoch):
             'acc': acc,
             'epoch': epoch,
         }
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
         torch.save(state, './checkpoint/ckpt.pth')
         best_acc = acc
 
+    state_fg_path = 'epoch{}.pth' .format(epoch)
+    state_for_graph = { 'acc' : acc, 'loss' : loss }
+    torch.save(state_for_graph, state_fg_path)
 
 
 
