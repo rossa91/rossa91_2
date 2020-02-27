@@ -18,7 +18,7 @@ model = {}
 model['vgg9'] = VGG('VGG9')
 model['mobilenet'] = MobileNet()
 model['mobilenet_v2'] = MobileNetV2()
-model['qvgg9'] = QVGG('VGG9', args.num_bit)
+model['qvgg9'] = QVGG('VGG9', args.num_bits)
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
