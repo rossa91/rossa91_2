@@ -13,14 +13,6 @@ import argparse
 
 from models import *
 from utils import progress_bar
-
-model = {}
-model['vgg9'] = VGG('VGG9')
-model['mobilenet'] = MobileNet()
-model['mobilenet_v2'] = MobileNetV2()
-model['qvgg9'] = QVGG('VGG9', args.num_bits)
-
-
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='learning rate')
@@ -30,6 +22,14 @@ parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_
 parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
 
 args = parser.parse_args()
+
+
+model = {}
+model['vgg9'] = VGG('VGG9')
+model['mobilenet'] = MobileNet()
+model['mobilenet_v2'] = MobileNetV2()
+model['qvgg9'] = QVGG('VGG9', args.num_bits)
+
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
