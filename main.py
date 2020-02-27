@@ -213,7 +213,7 @@ def test(epoch):
 
     state_fg_path = 'epoch{}.pth' .format(epoch)
     state_for_graph = { 'acc' : acc, 'loss' : loss }
-    torch.save(state_for_graph, state_fg_path)
+    torch.save(state_for_graph, './checkpoint/'+state_fg_path)
 
 
 
