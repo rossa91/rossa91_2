@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd.function import InplaceFunction, Function
 
-QParams = namedtuple('QParams', ['scale', 'zero_point', 'min_values', 'ranges])
+QParams = namedtuple('QParams', ['scale', 'zero_point', 'min_values', 'range'])
 
 _DEFAULT_FLATTEN = (1, -1)
 _DEFAULT_FLATTEN_GRAD = (0, -1)
