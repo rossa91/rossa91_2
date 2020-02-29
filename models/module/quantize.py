@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd.function import InplaceFunction, Function
 
-QParams = namedtuple('QParams', ['scale', 'zero_point'])
+QParams = namedtuple('QParams', ['scale', 'zero_point', 'min_values', 'ranges])
 
 _DEFAULT_FLATTEN = (1, -1)
 _DEFAULT_FLATTEN_GRAD = (0, -1)
@@ -33,6 +33,8 @@ def calculate_qparams(x, num_bits, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, 
         # TODO: re-add true zero computation
         qmin = 0.
         qmax = 2**num_bits -1
+        
+        range = (max_values - min_values) 
         scale = (max_values - min_values) / (qmax - qmin)
         
         initial_zero_point = qmin - min_values / scale
@@ -43,7 +45,7 @@ def calculate_qparams(x, num_bits, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, 
         else:
           nudged_zero_point = initial_zero_point.round()
           
-        return QParams(scale=scale, zero_point=nudged_zero_point)
+        return QParams(scale=scale, zero_point=nudged_zero_point, min_values=min_values, range=range)
 
 
 class UniformQuantize(InplaceFunction):
