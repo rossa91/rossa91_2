@@ -75,7 +75,9 @@ print('==> Building model..')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-net = QVGG('VGG9', args.num_bits)
+# net = QVGG('VGG9', args.num_bits)
+net = QMobileNet(num_bits=args.num_bits)
+
 
 net = net.to(device)
 if device == 'cuda':
