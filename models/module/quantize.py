@@ -92,6 +92,66 @@ class UniformQuantize(InplaceFunction):
 def quantize(x, num_bits=4, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
     return UniformQuantize().apply(x, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
 
+class MixedQuantize(InplaceFunction):
+
+    @staticmethod
+    def forward(ctx, input, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
+                reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
+
+        ctx.inplace = inplace
+
+        if ctx.inplace:
+            ctx.mark_dirty(input)
+            output = input
+        else:
+            output = input.clone()
+
+        if qparams is None:
+            assert num_bits is not None, "either provide qparams of num_bits to quantize"
+            qparams = calculate_qparams(
+                input, num_bits=num_bits, flatten_dims=flatten_dims, reduce_dim=reduce_dim)
+
+        qmin = -(2.**(num_bits - 1)) if signed else 0.
+        qmax = qmin + 2.**num_bits - 1.
+        scale = qparams.range / (qmax - qmin)
+
+
+        initial_zero_point = qmin - qparams.zero_point / scale
+        zero_point1 = torch.where(initial_zero_point < 0., qmin* torch.ones_like(initial_zero_point),  torch.zeros_like(initial_zero_point))
+        zero_point2 = torch.where(initial_zero_point > qmax, qmax*torch.ones_like(initial_zero_point), torch.zeros_like(initial_zero_point))
+        cond1 = initial_zero_point >= 0 
+        cond2 = initial_zero_point <= qmax
+        cond = cond1 & cond2
+        zero_point3 = torch.where(cond, initial_zero_point.round(), torch.zeros_like(initial_zero_point))
+        
+        zero_point = zero_point1 + zero_point2 + zero_point3
+        num_bits = qparams.num_bits
+
+        with torch.no_grad():
+            output.div_(scale).add_(qparams.zero_point)
+            if stochastic:
+                noise = output.new(output.shape).uniform_(-0.5, 0.5)
+                output.add_(noise)
+            # quantize
+            output.clamp_(qmin, qmax).round_()
+
+            if dequantize:
+              output.add_(zero_point).mul_(scale)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # straight-through estimator
+        grad_input = grad_output
+        return grad_input, None, None, None, None, None, None, None, None
+
+
+def mixed_quantize(x, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
+    return UniformQuantize().apply(x, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
+
+
+
+
 class QuantMeasure(nn.Module):
     """docstring for QuantMeasure."""
 
