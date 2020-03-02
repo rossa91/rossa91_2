@@ -91,13 +91,98 @@ class UniformQuantize(InplaceFunction):
 
 
 
+class MixedQuantize(InplaceFunction):
+
+    @classmethod
+    def forward(cls, ctx, input, mask=None, num_bits=8, min_value=None, max_value=None,
+                stochastic=False, inplace=False, enforce_true_zero=False, num_chunks=None, out_half=False):
+
+        num_chunks = num_chunks = input.shape[
+            0] if num_chunks is None else num_chunks
+        if min_value is None or max_value is None:
+            B = input.shape[0]
+            y = input.view(B // num_chunks, -1)
+        if min_value is None:
+            min_value = y.min(-1)[0].mean(-1)  # C
+            #min_value = float(input.view(input.size(0), -1).min(-1)[0].mean())
+        if max_value is None:
+            #max_value = float(input.view(input.size(0), -1).max(-1)[0].mean())
+            max_value = y.max(-1)[0].mean(-1)  # C
+
+        ctx.inplace = inplace
+        ctx.num_bits = num_bits
+        ctx.min_value = min_value
+        ctx.max_value = max_value
+        ctx.stochastic = stochastic
+
+        if ctx.inplace:
+            ctx.mark_dirty(input)
+            output1 = input
+            output2 = input 
+        else:
+            output1 = input.clone()
+            output2 = input.clone()
+
+        if mask is None:
+          mask = torch.ones_like(output)
+
+        qmin = 0.
+        qmax = 2.**num_bits - 1.
+        #import pdb; pdb.set_trace()
+        scale = (max_value - min_value) / (qmax - qmin)
+
+        scale = max(scale, 1e-8)
+
+        if enforce_true_zero:
+            initial_zero_point = qmin - min_value / scale
+            zero_point = 0.
+            # make zero exactly represented
+            if initial_zero_point < qmin:
+                zero_point = qmin
+            elif initial_zero_point > qmax:
+                zero_point = qmax
+            else:
+                zero_point = initial_zero_point
+            zero_point = int(zero_point)
+            output1.div_(scale).add_(zero_point)
+            output2.div_(scale).add_(zero_point)
+        else:
+            output1.add_(-min_value).div_(scale).add_(qmin)
+            output2.add_(-min_value).div_(scale).add_(qmin)
+
+        if ctx.stochastic:
+            noise = output1.new(output1.shape).uniform_(-0.5, 0.5)
+            output1.add_(noise)
+            output2.add_(noise)
+            
+        output1.clamp_(qmin, qmax).round_()  # quantize
+        output2.clamp_(qmin, qmax).mul_(2).round_().div_(2)  # quantize
+
+        output = output1 * mask + output2 * (1-mask)
+
+        if enforce_true_zero:
+            output.add_(-zero_point).mul_(scale)  # dequantize
+        else:
+            output.add_(-qmin).mul_(scale).add_(min_value)  # dequantize
+        if out_half and num_bits <= 16:
+            output = output.half()
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # straight-through estimator
+        grad_input = grad_output
+        return grad_input, None, None, None, None, None, None
+
+
+
 def quantize(x, num_bits=8, min_value=None, max_value=None, num_chunks=None, stochastic=False, inplace=False):
     return UniformQuantize().apply(x, num_bits, min_value, max_value, num_chunks, stochastic, inplace)
 
 
 
 def mixed_quantize(x, num_bits=8, min_value=None, max_value=None, num_chunks=None, stochastic=False, inplace=False):
-    return UniformQuantize().apply(x, num_bits, min_value, max_value, num_chunks, stochastic, inplace)
+    return MixedQuantize().apply(x, num_bits, min_value, max_value, num_chunks, stochastic, inplace)
 
 
 
