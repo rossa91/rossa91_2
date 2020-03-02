@@ -96,6 +96,12 @@ def quantize(x, num_bits=8, min_value=None, max_value=None, num_chunks=None, sto
 
 
 
+def mixed_quantize(x, num_bits=8, min_value=None, max_value=None, num_chunks=None, stochastic=False, inplace=False):
+    return UniformQuantize().apply(x, num_bits, min_value, max_value, num_chunks, stochastic, inplace)
+
+
+
+
 
 class QuantMeasure(nn.Module):
     """docstring for QuantMeasure."""
@@ -127,16 +133,22 @@ class QConv2d(nn.Conv2d):
     """docstring for QConv2d."""
 
     def __init__(self, in_channels, out_channels, kernel_size,
-                 stride=1, padding=0, dilation=1, groups=1, bias=False, num_bits=8, num_bits_weight=None):
+                 stride=1, padding=0, dilation=1, groups=1, bias=False, num_bits=8, num_bits_weight=None, mixed=True):
         super(QConv2d, self).__init__(in_channels, out_channels, kernel_size,
                                       stride, padding, dilation, groups, bias)
         self.num_bits = num_bits
         self.num_bits_weight = num_bits_weight or num_bits
         self.quantize_input = QuantMeasure(self.num_bits)
-      
+        self.mixed = mixed
+
     def forward(self, input):
         qinput = self.quantize_input(input)
-        qweight = quantize(self.weight, num_bits=self.num_bits_weight,
+        if self.mixed : 
+          qweight = mixed_quantize(self.weight, num_bits=self.num_bits_weight,
+                           min_value=float(self.weight.min()),
+                           max_value=float(self.weight.max()))
+        else : 
+          qweight = quantize(self.weight, num_bits=self.num_bits_weight,
                            min_value=float(self.weight.min()),
                            max_value=float(self.weight.max()))
 
@@ -154,17 +166,26 @@ class QConv2d(nn.Conv2d):
 class QLinear(nn.Linear):
     """docstring for QConv2d."""
 
-    def __init__(self, in_features, out_features, bias=False, num_bits=8, num_bits_weight=None):
+    def __init__(self, in_features, out_features, bias=False, num_bits=8, num_bits_weight=None, mixed=True):
         super(QLinear, self).__init__(in_features, out_features, bias)
         self.num_bits = num_bits
         self.num_bits_weight = num_bits_weight or num_bits
         self.quantize_input = QuantMeasure(self.num_bits)
+        self.mixed = mixed 
 
     def forward(self, input):
         qinput = self.quantize_input(input)
-        qweight = quantize(self.weight, num_bits=self.num_bits_weight,
+        
+        if self.mixed :
+          qweight = mixed_quantize(self.weight, num_bits=self.num_bits_weight,
                            min_value=float(self.weight.min()),
                            max_value=float(self.weight.max()))
+          
+        else:
+          qweight = quantize(self.weight, num_bits=self.num_bits_weight,
+                           min_value=float(self.weight.min()),
+                           max_value=float(self.weight.max()))
+                           
         if self.bias is not None:
             qbias = quantize(self.bias, num_bits=self.num_bits_weight)
         else:
