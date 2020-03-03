@@ -42,11 +42,12 @@ class VGG(nn.Module):
 
 
 class QVGG(nn.Module):
-    def __init__(self, vgg_name, num_bits):
+    def __init__(self, vgg_name, num_bits, mixed=True):
         super(QVGG, self).__init__()
         self.num_bits = num_bits
+        self.mixed = mixed
         self.features = self._make_layers(cfg[vgg_name])
-        self.classifier = QLinear(512, 10, num_bits=self.num_bits, num_bits_weight=self.num_bits)
+        self.classifier = QLinear(512, 10, num_bits=self.num_bits, num_bits_weight=self.num_bits, mixed=self.mixed)
 
     def forward(self, x):
         out = self.features(x)
@@ -61,7 +62,7 @@ class QVGG(nn.Module):
             if x == 'M':
                 layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
             else:
-                layers += [QConv2d(in_channels, x, kernel_size=3, padding=1, num_bits=self.num_bits, num_bits_weight=self.num_bits),
+                layers += [QConv2d(in_channels, x, kernel_size=3, padding=1, num_bits=self.num_bits, num_bits_weight=self.num_bits, mixed=self.mixed),
                            nn.BatchNorm2d(x),
                            nn.ReLU(inplace=True)]
                 in_channels = x
