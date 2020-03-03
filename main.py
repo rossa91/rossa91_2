@@ -110,12 +110,53 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=a
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
 
+#Training for tracking quantized bin change
+def track_train(epoch):
+    net.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+
+
+
+    print('\nEpoch: {}  lr : {:f}' .format(epoch+1, optimizer.param_groups[0]['lr']))
+
+
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        bwq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
+
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+     
+        awq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
+        
+        # check only bin change
+        check = dict([(k, abs(v-awq[k])) for k,v in bwq.items()])
+
+        train_loss += loss.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+#        print([(k, accum_check[k]+v) for k, v in  check.items()])
+        accum_check = dict([(k, accum_check[k]+v) for k, v in  check.items()])
+        
+
+        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+
+    return accum_check
+
 # Training for quantized model
 def qtrain(epoch):
     net.train()
     train_loss = 0
     correct = 0
     total = 0
+    
 
 
     print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
@@ -229,6 +270,11 @@ for epoch in range(start_epoch, start_epoch+350):
     qtrain(epoch)
   else:
     train(epoch)
+    
+# Need to modify how to acuumulate the checker
+#  if epoch == 0:
+#    initial_check = dict([(k ,torch.zeros_like(v)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
+#  partial_check = track_train(epoch)
   scheduler.step()
   test(epoch)
 
