@@ -1,239 +1,305 @@
-'''Train CIFAR10 with PyTorch.'''
+from collections import namedtuple
+import math
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
+from torch.autograd.function import InplaceFunction, Function
 
-import torchvision
-import torchvision.transforms as transforms
+QParams = namedtuple('QParams', ['range', 'zero_point', 'num_bits'])
 
-import os
-import argparse
-
-from models import *
-from utils import progress_bar
-parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
-parser.add_argument('--weight_decay', default=5e-4, type=float, help='learning rate')
-parser.add_argument('--num_bits', default=4, type=int, help='quantization_bits')
-parser.add_argument('--load_path', default=None, type=str, help='load_path')
-parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_path')
-parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
-parser.add_argument('--mixed', default=False, type=bool, help='MixedQuantization or Not')
+_DEFAULT_FLATTEN = (1, -1)
+_DEFAULT_FLATTEN_GRAD = (0, -1)
 
 
-args = parser.parse_args()
+def _deflatten_as(x, x_full):
+    shape = list(x.shape) + [1] * (x_full.dim() - x.dim())
+    return x.view(*shape)
 
 
-model = {}
-model['vgg9'] = VGG('VGG9')
-model['mobilenet'] = MobileNet()
-model['mobilenet_v2'] = MobileNetV2()
-model['qvgg9'] = QVGG('VGG9', args.num_bits)
-
-
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-best_acc = 0  # best test accuracy
-start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-
-# Data
-print('==> Preparing data..')
-transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
-
-transform_test = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
-
-trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
-
-testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
-testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-
-classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
-# Model
-print('==> Building model..')
-
-
-# net = VGG('VGG9')
-# net = ResNet18()
-# net = PreActResNet18()
-# net = GoogLeNet()
-# net = DenseNet121()
-# net = ResNeXt29_2x64d()
-# net = MobileNet()
-# net = MobileNetV2()
-# net = DPN92()
-# net = ShuffleNetG2()
-# net = SENet18()
-# net = ShuffleNetV2(1)
-# net = EfficientNetB0()
-net = QVGG('VGG9', args.num_bits, mixed=args.mixed)
-# net = QMobileNet(num_bits=args.num_bits)
-
-
-net = net.to(device)
-if device == 'cuda':
-    net = torch.nn.DataParallel(net)
-    cudnn.benchmark = True
-
-print('---- checkpoint path')
-if not os.path.isdir('checkpoint'):
-    os.mkdir('checkpoint')
-
-# re-training
-if args.load_path is not None:
-  print('==> load from checkpoint...')
-  print('==> for retraining model..')
-  if device == 'cuda':
-    load_ckpt = torch.load(args.load_path)
-  else :
-    load_ckpt = torch.load(args.load_path, map_location=torch.device('cpu'))
-    ckpt2 = {}
-    for k, v in load_ckpt['net'].items():
-      if 'module' in k:
-        ckpt2[k[len('module.'):]] = v
-    load_ckpt = ckpt2
-
-  net.load_state_dict(load_ckpt, False)  
-
-criterion = nn.CrossEntropyLoss()
-
-optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
-scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
-
-
-# Training for quantized model
-def qtrain(epoch):
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-
-
-    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
-    print('Saving for tracking....')
-    save_path =  args.save_path + '/tracking'
-    if not os.path.isdir(args.save_path):
-        os.mkdir(args.save_path)
-    if not os.path.isdir(save_path):
-        os.mkdir(save_path)
-
-
-
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-     
-        train_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        
-
-        save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
-        torch.save(net.state_dict, save_name)
-   
-    
-
-
-# Training for normal 
-def train(epoch):
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-
-
-    print('\nEpoch: {}  lr : {:f}' .format(epoch+1, optimizer.param_groups[0]['lr']))
-
-
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-     
-
-        train_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-  
-              
-
-def test(epoch):
-    global best_acc
-    net.eval()
-    test_loss = 0
-    correct = 0
-    total = 0
+def calculate_qparams(x, num_bits, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0,  reduce_type='mean', keepdim=False, true_zero=False):
     with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = net(inputs)
-            loss = criterion(outputs, targets)
-
-            test_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
-
-    # Save best accuracy model
-    acc = 100.*correct/total
-    if acc > best_acc:
-        print('Saving..')
-        state = {
-            'net': net.state_dict(),
-            'acc': acc,
-            'epoch': epoch,
-        }
-        torch.save(state, './checkpoint/ckpt.pth')
-        best_acc = acc
-
-    state_fg_path = 'epoch{}.pth' .format(epoch)
-    state_for_graph = { 'acc' : acc, 'loss' : loss }
-    torch.save(state_for_graph, './checkpoint/'+state_fg_path)
+        x_flat = x.flatten(*flatten_dims)
+        if x_flat.dim() == 1:
+            min_values = _deflatten_as(x_flat.min(), x)
+            max_values = _deflatten_as(x_flat.max(), x)
+        else:
+            min_values = _deflatten_as(x_flat.min(-1)[0], x)
+            max_values = _deflatten_as(x_flat.max(-1)[0], x)
+        if reduce_dim is not None:
+            if reduce_type == 'mean':
+                min_values = min_values.mean(reduce_dim, keepdim=keepdim)
+                max_values = max_values.mean(reduce_dim, keepdim=keepdim)
+            else:
+                min_values = min_values.min(reduce_dim, keepdim=keepdim)[0]
+                max_values = max_values.max(reduce_dim, keepdim=keepdim)[0]
+        # TODO: re-add true zero computation
+        range_values = max_values - min_values
+        return QParams(range=range_values, zero_point=min_values,
+                       num_bits=num_bits)
 
 
+class MixedQuantize(InplaceFunction):
 
-if args.qtype == True:
-  print('qtrain mode')
-else:
-  print('normal train mode')
+    @staticmethod
+    def forward(ctx, input, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
+                reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
 
-for epoch in range(start_epoch, start_epoch+350):
-  if args.qtype == True:
-    qtrain(epoch)
-  else:
-    train(epoch)
-  scheduler.step()
-  test(epoch)
+        ctx.inplace = inplace
+
+        if ctx.inplace:
+            ctx.mark_dirty(input)
+            output = input
+        else:
+            output = input.clone()
+
+        if qparams is None:
+            assert num_bits is not None, "either provide qparams of num_bits to quantize"
+            qparams = calculate_qparams(
+                input, num_bits=num_bits, flatten_dims=flatten_dims, reduce_dim=reduce_dim)
+
+        if mask is None:
+          mask = torch.ones_like(input)
+
+        zero_point = qparams.zero_point
+        num_bits = qparams.num_bits
+        qmin = -(2.**(num_bits - 1)) if signed else 0.
+        qmax = qmin + 2.**num_bits - 1.
+        scale = qparams.range / (qmax - qmin)
+        with torch.no_grad():
+            output.add_(qmin * scale - zero_point).div_(scale)
+            if stochastic:
+                noise = output.new(output.shape).uniform_(-0.5, 0.5)
+                output.add_(noise)
+            # quantize
+            qw1 = output.clamp_(qmin, qmax).round_()
+            qw2 = output.clamp_(qmin, qmax).mul_(2.).round_().div_(2.)
+            output = mask * qw1 + (1-mask)*qw2
+
+            if dequantize:
+                output.mul_(scale).add_(
+                    zero_point - qmin * scale)  # dequantize
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # straight-through estimator
+        grad_input = grad_output
+        return grad_input, None, None, None, None, None, None, None, None, None
 
 
 
 
+def quantize(x, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
+    return MixedQuantize().apply(x, mask, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
+
+
+
+class QuantMeasure(nn.Module):
+    """docstring for QuantMeasure."""
+
+    def __init__(self, num_bits=8, shape_measure=(1,), flatten_dims=_DEFAULT_FLATTEN,
+                 inplace=False, dequantize=True, stochastic=False, momentum=0.1, measure=False):
+        super(QuantMeasure, self).__init__()
+        self.register_buffer('running_zero_point', torch.zeros(*shape_measure))
+        self.register_buffer('running_range', torch.zeros(*shape_measure))
+        self.measure = measure
+        if self.measure:
+            self.register_buffer('num_measured', torch.zeros(1))
+        self.flatten_dims = flatten_dims
+        self.momentum = momentum
+        self.dequantize = dequantize
+        self.stochastic = stochastic
+        self.inplace = inplace
+        self.num_bits = num_bits
+
+    def forward(self, input, qparams=None):
+
+        if self.training or self.measure:
+            if qparams is None:
+                qparams = calculate_qparams(
+                    input, num_bits=self.num_bits, flatten_dims=self.flatten_dims, reduce_dim=0)
+            with torch.no_grad():
+                if self.measure:
+                    momentum = self.num_measured / (self.num_measured + 1)
+                    self.num_measured += 1
+                else:
+                    momentum = self.momentum
+                self.running_zero_point.mul_(momentum).add_(
+                    qparams.zero_point * (1 - momentum))
+                self.running_range.mul_(momentum).add_(
+                    qparams.range * (1 - momentum))
+        else:
+            qparams = QParams(range=self.running_range,
+                              zero_point=self.running_zero_point, num_bits=self.num_bits)
+        if self.measure:
+            return input
+        else:
+            q_input = quantize(input, qparams=qparams, dequantize=self.dequantize,
+                               stochastic=self.stochastic, inplace=self.inplace)
+            return q_input
+
+
+class QConv2d(nn.Conv2d):
+    """docstring for QConv2d."""
+
+    def __init__(self, in_channels, out_channels, kernel_size,
+                 stride=1, padding=0, dilation=1, groups=1, bias=None, num_bits=8, num_bits_weight=8, mixed=False, mask=None):
+        super(QConv2d, self).__init__(in_channels, out_channels, kernel_size,
+                                      stride, padding, dilation, groups, bias)
+        self.num_bits = num_bits
+        self.num_bits_weight = num_bits_weight or num_bits
+        self.quantize_input = QuantMeasure(
+            self.num_bits, shape_measure=(1, 1, 1, 1), flatten_dims=(1, -1))
+        self.mixed = mixed
+        self.mask = mask
+
+    def forward(self, input):
+        qinput = self.quantize_input(input)
+        weight_qparams = calculate_qparams(
+            self.weight, num_bits=self.num_bits_weight, flatten_dims=(1, -1), reduce_dim=None)
+        
+        if self.mixed is False: 
+          mask = None
+        else:
+          mask = self.mask
+        
+        qweight = quantize(self.weight, mask=mask, qparams=weight_qparams)
+
+        if self.bias is not None:
+            qbias = quantize(
+                self.bias, num_bits=32, 
+                flatten_dims=(0, -1))
+        else:
+            qbias = None
+
+        output = F.conv2d(qinput, qweight, qbias, self.stride,
+                              self.padding, self.dilation, self.groups)
+        return output
+
+
+class QLinear(nn.Linear):
+    """docstring for QConv2d."""
+
+    def __init__(self, in_features, out_features, bias=None, num_bits=8, num_bits_weight=8, mixed=True, mask=None):
+        super(QLinear, self).__init__(in_features, out_features, bias)
+        self.num_bits = num_bits
+        self.num_bits_weight = num_bits_weight or num_bits
+        self.quantize_input = QuantMeasure(self.num_bits)
+        self.mixed = mixed
+        self.mask = mask
+
+    def forward(self, input):
+        qinput = self.quantize_input(input)
+        weight_qparams = calculate_qparams(
+            self.weight, num_bits=self.num_bits_weight, flatten_dims=(1, -1), reduce_dim=None)
+
+        if self.mixed is False:
+          mask = None
+        else:
+          mask = self.mask
+        qweight = quantize(self.weight, mask=mask, qparams=weight_qparams)
+
+
+        if self.bias is not None:
+            qbias = quantize(
+                self.bias, num_bits=32,
+                flatten_dims=(0, -1))
+        else:
+            qbias = None
+
+        output = F.linear(qinput, qweight, qbias)
+
+        return output
+
+
+class RangeBN(nn.Module):
+    # this is normalized RangeBN
+
+    def __init__(self, num_features, dim=1, momentum=0.1, affine=True, num_chunks=16, eps=1e-5, num_bits=8, num_bits_grad=8):
+        super(RangeBN, self).__init__()
+        self.register_buffer('running_mean', torch.zeros(num_features))
+        self.register_buffer('running_var', torch.zeros(num_features))
+
+        self.momentum = momentum
+        self.dim = dim
+        if affine:
+            self.bias = nn.Parameter(torch.Tensor(num_features))
+            self.weight = nn.Parameter(torch.Tensor(num_features))
+        self.num_bits = num_bits
+        self.num_bits_grad = num_bits_grad
+        self.quantize_input = QuantMeasure(
+            self.num_bits, inplace=True, shape_measure=(1, 1, 1, 1), flatten_dims=(1, -1))
+        self.eps = eps
+        self.num_chunks = num_chunks
+        self.reset_params()
+
+    def reset_params(self):
+        if self.weight is not None:
+            self.weight.data.uniform_()
+        if self.bias is not None:
+            self.bias.data.zero_()
+
+    def forward(self, x):
+        x = self.quantize_input(x)
+        if x.dim() == 2:  # 1d
+            x = x.unsqueeze(-1,).unsqueeze(-1)
+
+        if self.training:
+            B, C, H, W = x.shape
+            y = x.transpose(0, 1).contiguous()  # C x B x H x W
+            y = y.view(C, self.num_chunks, (B * H * W) // self.num_chunks)
+            mean_max = y.max(-1)[0].mean(-1)  # C
+            mean_min = y.min(-1)[0].mean(-1)  # C
+            mean = y.view(C, -1).mean(-1)  # C
+            scale_fix = (0.5 * 0.35) * (1 + (math.pi * math.log(4)) **
+                                        0.5) / ((2 * math.log(y.size(-1))) ** 0.5)
+
+            scale = (mean_max - mean_min) * scale_fix
+            with torch.no_grad():
+                self.running_mean.mul_(self.momentum).add_(
+                    mean * (1 - self.momentum))
+
+                self.running_var.mul_(self.momentum).add_(
+                    scale * (1 - self.momentum))
+        else:
+            mean = self.running_mean
+            scale = self.running_var
+        # scale = quantize(scale, num_bits=self.num_bits, min_value=float(
+        #     scale.min()), max_value=float(scale.max()))
+        out = (x - mean.view(1, -1, 1, 1)) / \
+            (scale.view(1, -1, 1, 1) + self.eps)
+
+        if self.weight is not None:
+            qweight = self.weight
+            # qweight = quantize(self.weight, num_bits=self.num_bits,
+            #                    min_value=float(self.weight.min()),
+            #                    max_value=float(self.weight.max()))
+            out = out * qweight.view(1, -1, 1, 1)
+
+        if self.bias is not None:
+            qbias = self.bias
+            # qbias = quantize(self.bias, num_bits=self.num_bits)
+            out = out + qbias.view(1, -1, 1, 1)
+        if self.num_bits_grad is not None:
+            out = quantize_grad(
+                out, num_bits=self.num_bits_grad, flatten_dims=(1, -1))
+
+        if out.size(3) == 1 and out.size(2) == 1:
+            out = out.squeeze(-1).squeeze(-1)
+        return out
+
+
+class RangeBN1d(RangeBN):
+    # this is normalized RangeBN
+
+    def __init__(self, num_features, dim=1, momentum=0.1, affine=True, num_chunks=16, eps=1e-5, num_bits=8, num_bits_grad=8):
+        super(RangeBN1d, self).__init__(num_features, dim, momentum,
+                                        affine, num_chunks, eps, num_bits, num_bits_grad)
+        self.quantize_input = QuantMeasure(
+            self.num_bits, inplace=True, shape_measure=(1, 1), flatten_dims=(1, -1))
+
+if __name__ == '__main__':
+    x = torch.rand(2, 3)
+    x_q = quantize(x, flatten_dims=(-1), num_bits=8, dequantize=True)
+    print(x)
+    print(x_q)
