@@ -75,6 +75,7 @@ class UniformQuantize(InplaceFunction):
                     zero_point - qmin * scale)  # dequantize
         return output
 
+
     @staticmethod
     def backward(ctx, grad_output):
         # straight-through estimator
@@ -83,12 +84,65 @@ class UniformQuantize(InplaceFunction):
 
 
 
+class MixedQuantize(InplaceFunction):
+
+    @staticmethod
+    def forward(ctx, input, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
+                reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
+
+        ctx.inplace = inplace
+
+        if ctx.inplace:
+            ctx.mark_dirty(input)
+            output = input
+        else:
+            output = input.clone()
+
+        if qparams is None:
+            assert num_bits is not None, "either provide qparams of num_bits to quantize"
+            qparams = calculate_qparams(
+                input, num_bits=num_bits, flatten_dims=flatten_dims, reduce_dim=reduce_dim)
+
+        if mask is None:
+          mask = torch.ones_like(input)
+
+
+        zero_point = qparams.zero_point
+        num_bits = qparams.num_bits
+        qmin = -(2.**(num_bits - 1)) if signed else 0.
+        qmax = qmin + 2.**num_bits - 1.
+        scale = qparams.range / (qmax - qmin)
+        with torch.no_grad():
+            output.add_(qmin * scale - zero_point).div_(scale)
+            if stochastic:
+                noise = output.new(output.shape).uniform_(-0.5, 0.5)
+                output.add_(noise)
+            # quantize
+            q1 = output.clamp_(qmin, qmax).round_()
+            q2 = output.clamp_(qmin, qmax).mul_(2.).round_().div_(2)
+            output = mask * q1 + (1-mask) * q2
+
+            if dequantize:
+                output.mul_(scale).add_(
+                    zero_point - qmin * scale)  # dequantize
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # straight-through estimator
+        grad_input = grad_output
+        return grad_input, None, None, None, None, None, None, None, None, None
+
+
+
+
+
 
 def quantize(x, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
     return UniformQuantize().apply(x, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
 
-def mixed_quantize(x, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
-    return UniformQuantize().apply(x, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
+def mixed_quantize(x, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
+    return MixedQuantize().apply(x, mask, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
 
 
 class QuantMeasure(nn.Module):
