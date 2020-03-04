@@ -35,6 +35,8 @@ model['qvgg9'] = QVGG('VGG9', args.num_bits)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+last_epoch = start_epoch + 350
+
 
 # Data
 print('==> Preparing data..')
@@ -116,8 +118,13 @@ def track_train(epoch):
     train_loss = 0
     correct = 0
     total = 0
+    accum_check = dict([(k ,torch.zeros_like(v)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
 
-
+    save_path =  args.save_path + '/tracking'
+    if not os.path.isdir(args.save_path):
+        os.mkdir(args.save_path)
+    if not os.path.isdir(save_path):
+        os.mkdir(save_path)
 
     print('\nEpoch: {}  lr : {:f}' .format(epoch+1, optimizer.param_groups[0]['lr']))
 
@@ -126,6 +133,7 @@ def track_train(epoch):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         outputs = net(inputs)
+
         bwq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
 
         loss = criterion(outputs, targets)
@@ -133,65 +141,24 @@ def track_train(epoch):
         optimizer.step()
      
         awq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
-        
-        # check only bin change
+
         check = dict([(k, abs(v-awq[k])) for k,v in bwq.items()])
-
         train_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
-#        print([(k, accum_check[k]+v) for k, v in  check.items()])
         accum_check = dict([(k, accum_check[k]+v) for k, v in  check.items()])
-        
 
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+
+    track_name = save_path+'/track{}.pth' .format(epoch+1) 
+    torch.save(accum_check, track_name)
+
+    print(accum_check['module.classifier.weight'])
+    progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
-    return accum_check
 
-# Training for quantized model
-def qtrain(epoch):
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-    
-
-
-    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
-    print('Saving for tracking....')
-    save_path =  args.save_path + '/tracking'
-    if not os.path.isdir(args.save_path):
-        os.mkdir(args.save_path)
-    if not os.path.isdir(save_path):
-        os.mkdir(save_path)
-
-
-
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-     
-        train_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        
-
-        save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
-        torch.save(net.state_dict, save_name)
    
-    
-
-
 # Training for normal 
 def train(epoch):
     net.train()
@@ -265,16 +232,16 @@ if args.qtype == True:
 else:
   print('normal train mode')
 
-for epoch in range(start_epoch, start_epoch+350):
+for epoch in range(start_epoch, last_epoch):
   if args.qtype == True:
-    qtrain(epoch)
+    track_train(epoch)
   else:
     train(epoch)
     
 # Need to modify how to acuumulate the checker
 #  if epoch == 0:
 #    initial_check = dict([(k ,torch.zeros_like(v)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
-#  partial_check = track_train(epoch)
+#  track_train(epoch)
   scheduler.step()
   test(epoch)
 
