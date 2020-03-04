@@ -35,7 +35,7 @@ model['qvgg9'] = QVGG('VGG9', args.num_bits)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-last_epoch = start_epoch + 350
+last_epoch = start_epoch + 10
 
 
 # Data
@@ -151,6 +151,7 @@ def track_train(epoch):
 
 
     track_name = save_path+'/track{}.pth' .format(epoch+1) 
+    print(track_name)
     torch.save(accum_check, track_name)
 
     print(accum_check['module.classifier.weight'])
@@ -158,7 +159,48 @@ def track_train(epoch):
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
+# Training for quantized model
+def qtrain(epoch):
+    net.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+    
+
+
+    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
+    print('Saving for tracking....')
+    save_path =  args.save_path + '/tracking'
+    if not os.path.isdir(args.save_path):
+        os.mkdir(args.save_path)
+    if not os.path.isdir(save_path):
+        os.mkdir(save_path)
+
+
+
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+     
+        train_loss += loss.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        
+
+        save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
+        torch.save(net.state_dict, save_name)
    
+    
+
+
 # Training for normal 
 def train(epoch):
     net.train()
@@ -226,6 +268,20 @@ def test(epoch):
     torch.save(state_for_graph, './checkpoint/'+state_fg_path)
 
 
+def accum_all_track(last_epoch, load_path):
+
+  track_load = torch.load(load_path+'/track1.pth')
+  
+  accum_track = dict([(k, torch.zeros_like(v)) for k, v in track_load.items()])
+  for i in range(last_epoch):
+    load_ppath = load_path+'/track{}.pth' .format(i+1)
+    track_load = torch.load(load_ppath)
+    
+    for k, v in track_load.items():
+      accum_track[k] = accum_track[k]+v
+  
+  return accum_track
+
 
 if args.qtype == True:
   print('qtrain mode')
@@ -237,14 +293,12 @@ for epoch in range(start_epoch, last_epoch):
     track_train(epoch)
   else:
     train(epoch)
-    
-# Need to modify how to acuumulate the checker
-#  if epoch == 0:
-#    initial_check = dict([(k ,torch.zeros_like(v)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
-#  track_train(epoch)
+  
   scheduler.step()
   test(epoch)
 
+if args.qtype == True :
+  accum_all_track(last_epoch, load_path='./checkpoint/tracking')
 
 
 
