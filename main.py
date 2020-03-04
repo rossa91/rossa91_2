@@ -301,4 +301,12 @@ if args.qtype == True :
   accum_all_track(last_epoch, load_path='./checkpoint/tracking')
 
 
+#test = bin_change['module.features.0.weight'].reshape([-1, ])
+#p = int(len(test)*0.2)
+#print(p)
+#v, idx = test.topk(k=p)
+#threshold = v[p-1]
+
+#mask = torch.where(test > threshold, torch.ones_like(test), torch.zeros_like(test)).reshape(bin_change['module.features.0.weight'].size())
+
 
