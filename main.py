@@ -13,6 +13,8 @@ import argparse
 
 from models import *
 from utils import progress_bar
+from auxil import *
+
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--weight_decay', default=5e-4, type=float, help='learning rate')
@@ -20,22 +22,18 @@ parser.add_argument('--num_bits', default=4, type=int, help='quantization_bits')
 parser.add_argument('--load_path', default=None, type=str, help='load_path')
 parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_path')
 parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
+parser.add_argument('--epoch', default=350, type=int, help='Epoch')
+
 
 args = parser.parse_args()
 
-
-model = {}
-model['vgg9'] = VGG('VGG9')
-model['mobilenet'] = MobileNet()
-model['mobilenet_v2'] = MobileNetV2()
-model['qvgg9'] = QVGG('VGG9', args.num_bits)
 
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-last_epoch = start_epoch + 10
+last_epoch = start_epoch + args.epoch
 
 
 # Data
@@ -77,7 +75,7 @@ print('==> Building model..')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-net = QVGG('VGG9', args.num_bits)
+net = QVGG('VGG9', num_bits=args.num_bits, mixed=False, mask=None)
 # net = QMobileNet(num_bits=args.num_bits)
 
 
@@ -268,19 +266,6 @@ def test(epoch):
     torch.save(state_for_graph, './checkpoint/'+state_fg_path)
 
 
-def accum_all_track(last_epoch, load_path):
-
-  track_load = torch.load(load_path+'/track1.pth')
-  
-  accum_track = dict([(k, torch.zeros_like(v)) for k, v in track_load.items()])
-  for i in range(last_epoch):
-    load_ppath = load_path+'/track{}.pth' .format(i+1)
-    track_load = torch.load(load_ppath)
-    
-    for k, v in track_load.items():
-      accum_track[k] = accum_track[k]+v
-  
-  return accum_track
 
 
 if args.qtype == True:
@@ -298,15 +283,9 @@ for epoch in range(start_epoch, last_epoch):
   test(epoch)
 
 if args.qtype == True :
-  accum_all_track(last_epoch, load_path='./checkpoint/tracking')
+#  accum_all_track(last_epoch, load_path='./checkpoint/tracking')
+   accum_all_track(load_path='./checkpoint/tracking')
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.2)
 
-
-#test = bin_change['module.features.0.weight'].reshape([-1, ])
-#p = int(len(test)*0.2)
-#print(p)
-#v, idx = test.topk(k=p)
-#threshold = v[p-1]
-
-#mask = torch.where(test > threshold, torch.ones_like(test), torch.zeros_like(test)).reshape(bin_change['module.features.0.weight'].size())
 
 
