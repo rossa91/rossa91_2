@@ -6,14 +6,17 @@ def accum_all_track(load_path):
   list = glob.glob(load_path+'/*')
   
   initial_load = torch.load(list[0])
-  accum_track = dict([(k, torch.zeros_like(v.cpu())) for k, v in initial_load.items()])
+#  accum_track = dict([(k, torch.zeros_like(v.cpu())) for k, v in initial_load.items()])
+  accum_track = dict([(k, torch.zeros_like(v)) for k, v in initial_load.items()])
+
 
   for path in list:
     track_load = torch.load(path)
 
     for k, v in track_load.items():
-      v_ = v.cpu()
-      accum_track[k] += accum_track[k]+v_.detach().numpy()
+#      v_ = v.cpu()
+#      accum_track[k] += accum_track[k]+v_.detach().numpy()
+       accum_track[k] += accum_track[k]+v
   
   torch.save(accum_track, load_path+'/track.pth')
   print('Save accum all track...')
@@ -40,6 +43,7 @@ def make_mask(load_path, mixed_portion):
   mask = dict([(k, make_mask_sub(v[1], mixed_portion)) for k, v in enumerate(bin_change.items())])
 
 
-  torch.save(mask, load_path+'/mask.pth')
+  torch.save(mask, load_path+'/mask_'+str(mixed_portion)+'.pth')
   print('Make mask..')
   
+
