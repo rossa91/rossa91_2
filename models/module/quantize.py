@@ -42,9 +42,10 @@ class MixedQuantize(InplaceFunction):
 
     @staticmethod
     def forward(ctx, input, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
-                reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
+                reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False, cus_grad=None):
 
         ctx.inplace = inplace
+        ctx.cus_grad = cus_grad
 
         if ctx.inplace:
             ctx.mark_dirty(input)
@@ -89,10 +90,13 @@ class MixedQuantize(InplaceFunction):
     def backward(ctx, grad_output):
         # straight-through estimator
 #        grad_input = grad_output
-        input, output = ctx.saved_tensors
-        distance = abs(output-input)
-        grad_input = torch.where( distance > ctx.one_bin * 0.1, grad_output * 0.8, grad_output)
-
+        if ctx.cus_grad is True:
+          input, output = ctx.saved_tensors
+          distance = abs(output-input)
+          grad_input = torch.where( distance > ctx.one_bin * 0.1, grad_output * 0.8, grad_output)
+        else:
+          grad_input = grad_output
+          
         return grad_input, None, None, None, None, None, None, None, None, None
 
 
@@ -312,4 +316,3 @@ if __name__ == '__main__':
     x_q = quantize(x, flatten_dims=(-1), num_bits=8, dequantize=True)
     print(x)
     print(x_q)
-
