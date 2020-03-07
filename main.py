@@ -24,10 +24,19 @@ parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_
 parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
 parser.add_argument('--epoch', default=350, type=int, help='Epoch')
 
+#for mixed quantization
+parser.add_argument('--mixed', default=False, type=bool, help='mixed quantization or not')
+parser.add_argument('--mask_load', default=None, type=str, help='To train mixed precision load the mask')
+
+
 
 args = parser.parse_args()
 
-
+# Set environment
+if args.mixed is True :
+  MASK = torch.load(args.mask_load)
+else:
+  MASK = None
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -75,7 +84,7 @@ print('==> Building model..')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-net = QVGG('VGG9', num_bits=args.num_bits, mixed=False, mask=None)
+net = QVGG('VGG9', num_bits=args.num_bits, mixed=args.mixed, mask=MASK)
 # net = QMobileNet(num_bits=args.num_bits)
 
 
@@ -94,6 +103,9 @@ if args.load_path is not None:
   print('==> for retraining model..')
   if device == 'cuda':
     load_ckpt = torch.load(args.load_path)
+    if args.mixed is True:
+      start_epoch = load_ckpt['epoch']
+      best_acc = load_ckpt['acc']
   else :
     load_ckpt = torch.load(args.load_path, map_location=torch.device('cpu'))
     ckpt2 = {}
@@ -256,7 +268,7 @@ def test(epoch):
         state = {
             'net': net.state_dict(),
             'acc': acc,
-            'epoch': epoch,
+            'epoch': epoch+1,
         }
         torch.save(state, './checkpoint/ckpt.pth')
         best_acc = acc
@@ -285,7 +297,23 @@ for epoch in range(start_epoch, last_epoch):
 if args.qtype == True :
 #  accum_all_track(last_epoch, load_path='./checkpoint/tracking')
    accum_all_track(load_path='./checkpoint/tracking')
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.1)
    make_mask(load_path='./checkpoint/tracking', mixed_portion=0.2)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.3)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.4)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.5)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.6)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.7)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.8)
+   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.9)  
+   
+   
+   
+   
+   
+   
+   
+
 
 
 
