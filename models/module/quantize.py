@@ -58,7 +58,7 @@ class MixedQuantize(InplaceFunction):
                 input, num_bits=num_bits, flatten_dims=flatten_dims, reduce_dim=reduce_dim)
 
         if mask is None:
-          mask = torch.zeros_like(input)
+          mask = torch.ones_like(input)
 
         zero_point = qparams.zero_point
         num_bits = qparams.num_bits
@@ -75,15 +75,24 @@ class MixedQuantize(InplaceFunction):
             qw2 = output.clamp_(qmin, qmax).mul_(2.).round_().div_(2.)
             output = (1-mask) * qw1 + mask*qw2
 
+
             if dequantize:
                 output.mul_(scale).add_(
                     zero_point - qmin * scale)  # dequantize
+        
+        ctx.one_bin = scale+(zero_point - qmin*scale)
+        ctx.save_for_backward(input, output)
+
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         # straight-through estimator
-        grad_input = grad_output
+#        grad_input = grad_output
+        input, output = ctx.saved_tensors
+        distance = abs(output-input)
+        grad_input = torch.where( distance > ctx.one_bin * 0.1, grad_output * 0.8, grad_output)
+
         return grad_input, None, None, None, None, None, None, None, None, None
 
 
@@ -303,3 +312,4 @@ if __name__ == '__main__':
     x_q = quantize(x, flatten_dims=(-1), num_bits=8, dequantize=True)
     print(x)
     print(x_q)
+
