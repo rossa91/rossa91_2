@@ -73,7 +73,7 @@ class MixedQuantize(InplaceFunction):
             # quantize
             qw1 = output.clamp_(qmin, qmax).round_()
             qw2 = output.clamp_(qmin, qmax).mul_(2.).round_().div_(2.)
-            output = mask * qw1 + (1-mask)*qw2
+            output = (1-mask) * qw1 + mask*qw2
 
             if dequantize:
                 output.mul_(scale).add_(
