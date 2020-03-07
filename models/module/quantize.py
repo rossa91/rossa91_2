@@ -58,7 +58,7 @@ class MixedQuantize(InplaceFunction):
                 input, num_bits=num_bits, flatten_dims=flatten_dims, reduce_dim=reduce_dim)
 
         if mask is None:
-          mask = torch.ones_like(input)
+          mask = torch.zeros_like(input)
 
         zero_point = qparams.zero_point
         num_bits = qparams.num_bits
