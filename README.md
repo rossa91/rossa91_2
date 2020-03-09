@@ -1,4 +1,4 @@
-# mixedquant
+# rossa91
 
 | GPU | NETWORK | PERFORMACNE | 
 |:-------|-------:|:------:|
