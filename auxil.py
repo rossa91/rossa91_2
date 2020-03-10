@@ -2,13 +2,33 @@
 import glob 
 import torch
 
+
+def accum_section_track(section, load_path):
+
+  initial_load = torch.load(load_path+'/track0.pth')
+  accum_track = dict([(k, torch.zeros_like(v)) for k, v in initial_load.items()])
+
+  for i in range(section[0], section[1]+1):
+    path = load_path + '/track'+str(i)+'.pth'
+    track_load = torch.load(path)
+    for k, v in track_load.items():
+      accum_track[k] += v
+  
+  save_path = load_path+'/track_section'+str(section[0])+'_'+str(section[1])
+  if not os.path.isdir(save_path):
+    os.mkdir(save_path)
+  
+  torch.save(accum_track, save_path+'/track.pth')
+
+
+
 def accum_all_track(load_path):
   list = glob.glob(load_path+'/*')
   
   initial_load = torch.load(list[0])
 #  accum_track = dict([(k, torch.zeros_like(v.cpu())) for k, v in initial_load.items()])
   accum_track = dict([(k, torch.zeros_like(v)) for k, v in initial_load.items()])
-
+m
 
   for path in list:
     track_load = torch.load(path)
@@ -16,7 +36,7 @@ def accum_all_track(load_path):
     for k, v in track_load.items():
 #      v_ = v.cpu()
 #      accum_track[k] += accum_track[k]+v_.detach().numpy()
-       accum_track[k] += accum_track[k]+v
+       accum_track[k] += v
   
   torch.save(accum_track, load_path+'/track.pth')
   print('Save accum all track...')
