@@ -24,6 +24,12 @@ parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_
 parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
 parser.add_argument('--epoch', default=350, type=int, help='Epoch')
 
+#for track quantization
+parser.add_argument('--start', default=0, type=int, help='Start Epoch')
+parser.add_argument('--last', default=150, type=int, help='Last Epoch')
+
+
+
 #for mixed quantization
 parser.add_argument('--mixed', default=False, type=bool, help='mixed quantization or not')
 parser.add_argument('--mask_load', default=None, type=str, help='To train mixed precision load the mask')
@@ -285,27 +291,23 @@ if args.qtype == True:
 else:
   print('normal train mode')
 
-for epoch in range(start_epoch, last_epoch):
-  if args.qtype == True:
-    track_train(epoch)
-  else:
-    train(epoch)
-  
-  scheduler.step()
-  test(epoch)
-
 if args.qtype == True :
-#  accum_all_track(last_epoch, load_path='./checkpoint/tracking')
-   accum_all_track(load_path='./checkpoint/tracking')
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.1)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.2)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.3)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.4)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.5)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.6)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.7)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.8)
-   make_mask(load_path='./checkpoint/tracking', mixed_portion=0.9)  
+  for epoch in range(args.start, args.last):
+    track_train(epoch)
+    scheduler.step()
+    test(epoch)
+  
+  accum_section_track(section=[args.start, args.last], load_path='./checkpoint/tracking')
+  for i in range(1,10):
+    make_mask(load_path='./checkpoint/tracking/'+'track_section'+str(args.start)+'_'+str(args.last), mixed_portion=0.1*i)
+
+else:
+  for epoch in range(start_epoch, last_epoch):
+    train(epoch)
+    
+    scheduler.step()
+    test(epoch)
+
    
    
    
