@@ -81,21 +81,21 @@ class MixedQuantize(InplaceFunction):
                 output.mul_(scale).add_(
                     zero_point - qmin * scale)  # dequantize
         
-        ctx.one_bin = scale+(zero_point - qmin*scale)
-        ctx.save_for_backward(input, output)
+ #       ctx.one_bin = scale+(zero_point - qmin*scale)
+ #       ctx.save_for_backward(input, output)
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         # straight-through estimator
-#        grad_input = grad_output
-        if ctx.cus_grad is True:
-          input, output = ctx.saved_tensors
-          distance = abs(output-input)
-          grad_input = torch.where( distance > ctx.one_bin * 0.1, grad_output * 0.8, grad_output)
-        else:
-          grad_input = grad_output
+        grad_input = grad_output
+#        if ctx.cus_grad is True:
+ #         input, output = ctx.saved_tensors
+  #        distance = abs(output-input)
+  #        grad_input = torch.where( distance > ctx.one_bin * 0.1, grad_output * 0.8, grad_output)
+  #      else:
+  #        grad_input = grad_output
           
         return grad_input, None, None, None, None, None, None, None, None, None
 
