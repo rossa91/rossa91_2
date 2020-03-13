@@ -16,7 +16,7 @@ def _deflatten_as(x, x_full):
     return x.view(*shape)
 
 
-def calculate_qparams(x, num_bits, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0,  reduce_type='mean', keepdim=False, true_zero=False):
+def calculate_qparams(x, num_bits, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0,  reduce_type='max', keepdim=False, true_zero=False):
     with torch.no_grad():
         x_flat = x.flatten(*flatten_dims)
         if x_flat.dim() == 1:
@@ -38,28 +38,29 @@ def calculate_qparams(x, num_bits, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, 
                        num_bits=num_bits)
 
 
+
 class MixedQuantize(InplaceFunction):
 
     @staticmethod
-    def forward(ctx, input, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
-                reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False, cus_grad=None):
+    def forward(ctx, input, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
+                reduce_dim=0, dequantize=True, signed=False, inplace=False, mask=None, smooth_grad=True):
 
         ctx.inplace = inplace
-        ctx.cus_grad = cus_grad
 
         if ctx.inplace:
             ctx.mark_dirty(input)
-            output = input
+            weight = input
         else:
-            output = input.clone()
-
+            weight = input.clone()
+            
         if qparams is None:
             assert num_bits is not None, "either provide qparams of num_bits to quantize"
             qparams = calculate_qparams(
                 input, num_bits=num_bits, flatten_dims=flatten_dims, reduce_dim=reduce_dim)
 
         if mask is None:
-          mask = torch.ones_like(input)
+          mask = torch.zeros_like(weight)
+
 
         zero_point = qparams.zero_point
         num_bits = qparams.num_bits
@@ -67,43 +68,49 @@ class MixedQuantize(InplaceFunction):
         qmax = qmin + 2.**num_bits - 1.
         scale = qparams.range / (qmax - qmin)
         with torch.no_grad():
-            output.add_(qmin * scale - zero_point).div_(scale)
-            if stochastic:
-                noise = output.new(output.shape).uniform_(-0.5, 0.5)
-                output.add_(noise)
+            
+
+            weight.add_(qmin * scale - zero_point).div_(scale)
+            
             # quantize
-            qw1 = output.clamp_(qmin, qmax).round_()
-            qw2 = output.clamp_(qmin, qmax).mul_(2.).round_().div_(2.)
-            output = (1-mask) * qw1 + mask*qw2
+            weight.clamp_(qmin, qmax)
+            qw1 = weight.round_()
+            qw2 = weight.mul_(2.).round_().div_(2.)
 
-
+            output = (1-mask) * qw1 + mask * qw2
+           
             if dequantize:
                 output.mul_(scale).add_(
                     zero_point - qmin * scale)  # dequantize
-        
- #       ctx.one_bin = scale+(zero_point - qmin*scale)
- #       ctx.save_for_backward(input, output)
+
+              
+            ctx.smooth_grad = smooth_grad
+            #for smoothing gradient noise
+            if smooth_grad is True:
+              section = qparams.range / (2**(num_bits-1)) / 2
+              distance = section - abs(output - input)
+              ctx.section = section
+              ctx.distance = distance
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         # straight-through estimator
-        grad_input = grad_output
-#        if ctx.cus_grad is True:
- #         input, output = ctx.saved_tensors
-  #        distance = abs(output-input)
-  #        grad_input = torch.where( distance > ctx.one_bin * 0.1, grad_output * 0.8, grad_output)
-  #      else:
-  #        grad_input = grad_output
-          
+        smooth_grad = ctx.smooth_grad
+        if smooth_grad is None or smooth_grad is False :
+          grad_input = grad_output
+        else:
+          section = ctx.section
+          distance = ctx.distance
+          grad_input = torch.where(distance < section * 0.2, grad_output*0.5, grad_output)
+#          print('section', section)
+#          print('distance', distance[0])
         return grad_input, None, None, None, None, None, None, None, None, None
 
 
-
-
-def quantize(x, mask=None, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, stochastic=False, inplace=False):
-    return MixedQuantize().apply(x, mask, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, stochastic, inplace)
+def quantize(x, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN, reduce_dim=0, dequantize=True, signed=False, inplace=False, mask=None, smooth_grad=False):
+    return MixedQuantize().apply(x, num_bits, qparams, flatten_dims, reduce_dim, dequantize, signed, inplace, mask, smooth_grad)
 
 
 
@@ -121,7 +128,6 @@ class QuantMeasure(nn.Module):
         self.flatten_dims = flatten_dims
         self.momentum = momentum
         self.dequantize = dequantize
-        self.stochastic = stochastic
         self.inplace = inplace
         self.num_bits = num_bits
 
@@ -148,7 +154,7 @@ class QuantMeasure(nn.Module):
             return input
         else:
             q_input = quantize(input, qparams=qparams, dequantize=self.dequantize,
-                               stochastic=self.stochastic, inplace=self.inplace)
+                               inplace=self.inplace)
             return q_input
 
 
@@ -156,69 +162,73 @@ class QConv2d(nn.Conv2d):
     """docstring for QConv2d."""
 
     def __init__(self, in_channels, out_channels, kernel_size,
-                 stride=1, padding=0, dilation=1, groups=1, bias=None, num_bits=8, num_bits_weight=8, mixed=False, mask=None):
+                 stride=1, padding=0, dilation=1, groups=1, bias=True, num_bits=8, num_bits_weight=8, mixed=False, mask=None, smooth_grad=False):
         super(QConv2d, self).__init__(in_channels, out_channels, kernel_size,
                                       stride, padding, dilation, groups, bias)
         self.num_bits = num_bits
+        self.mixed = mixed
+        self.mask = mask
+        self.smooth_grad = smooth_grad
         self.num_bits_weight = num_bits_weight or num_bits
         self.quantize_input = QuantMeasure(
             self.num_bits, shape_measure=(1, 1, 1, 1), flatten_dims=(1, -1))
-        self.mixed = mixed
-        self.mask = mask
+     
 
     def forward(self, input):
         qinput = self.quantize_input(input)
         weight_qparams = calculate_qparams(
             self.weight, num_bits=self.num_bits_weight, flatten_dims=(1, -1), reduce_dim=None)
         
-        if self.mixed is False: 
+        if self.mixed is False:
           mask = None
-        else:
+        else :
           mask = self.mask
-        
-        qweight = quantize(self.weight, mask=mask, qparams=weight_qparams)
+
+        qweight = quantize(self.weight, qparams=weight_qparams, mask=mask, smooth_grad=self.smooth_grad)
 
         if self.bias is not None:
             qbias = quantize(
-                self.bias, num_bits=32, 
+                self.bias, num_bits=self.num_bits_weight + self.num_bits,
                 flatten_dims=(0, -1))
         else:
-            qbias = None
+            qbias = self.bias
 
         output = F.conv2d(qinput, qweight, qbias, self.stride,
                               self.padding, self.dilation, self.groups)
+
         return output
 
 
 class QLinear(nn.Linear):
     """docstring for QConv2d."""
 
-    def __init__(self, in_features, out_features, bias=None, num_bits=8, num_bits_weight=8, mixed=True, mask=None):
+    def __init__(self, in_features, out_features, bias=True, num_bits=8, num_bits_weight=8, mixed=False, mask=None, smooth_grad=False):
         super(QLinear, self).__init__(in_features, out_features, bias)
         self.num_bits = num_bits
-        self.num_bits_weight = num_bits_weight or num_bits
-        self.quantize_input = QuantMeasure(self.num_bits)
         self.mixed = mixed
         self.mask = mask
+        self.smooth_grad = smooth_grad
+        self.num_bits_weight = num_bits_weight or num_bits
+        self.quantize_input = QuantMeasure(self.num_bits)
 
     def forward(self, input):
         qinput = self.quantize_input(input)
         weight_qparams = calculate_qparams(
             self.weight, num_bits=self.num_bits_weight, flatten_dims=(1, -1), reduce_dim=None)
-
+        
         if self.mixed is False:
           mask = None
         else:
           mask = self.mask
-        qweight = quantize(self.weight, mask=mask, qparams=weight_qparams)
 
-
+        qweight = quantize(self.weight, qparams=weight_qparams, smooth_grad=self.smooth_grad, mask=mask)
         if self.bias is not None:
             qbias = quantize(
-                self.bias, num_bits=32,
+                self.bias, num_bits=self.num_bits_weight + self.num_bits,
                 flatten_dims=(0, -1))
         else:
-            qbias = None
+            qbias = self.bias
+
 
         output = F.linear(qinput, qweight, qbias)
 
