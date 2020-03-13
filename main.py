@@ -13,43 +13,37 @@ import argparse
 
 from models import *
 from utils import progress_bar
-from auxil import *
+
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
-parser.add_argument('--weight_decay', default=5e-4, type=float, help='learning rate')
-parser.add_argument('--num_bits', default=4, type=int, help='quantization_bits')
-parser.add_argument('--load_path', default=None, type=str, help='load_path')
-parser.add_argument('--save_path', default='./checkpoint', type=str, help='save_path')
-parser.add_argument('--qtype', default=False, type=bool, help='Quantization Type or Not')
-parser.add_argument('--epoch', default=350, type=int, help='Epoch')
+parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
+parser.add_argument('--save_path', default='./checkpoint', type=str, help='tracking bin change save_path')
+parser.add_argument('--epoch', default=350, type=int, help='epoch')
 
-#for track quantization
-parser.add_argument('--start', default=0, type=int, help='Start Epoch')
-parser.add_argument('--last', default=150, type=int, help='Last Epoch')
+#for quantization
+parser.add_argument('--num_bits', default=4, type=int, help='quantization bit width')
+parser.add_argument('--smooth_grad', default=False, type=bool, help='smooth gradient True or False')
 
-
+#track train
+parser.add_argument('--qtype', default=False, type=bool, help='tracking bin change mode train or not')
 
 #for mixed quantization
 parser.add_argument('--mixed', default=False, type=bool, help='mixed quantization or not')
 parser.add_argument('--mask_load', default=None, type=str, help='To train mixed precision load the mask')
 
 
-
 args = parser.parse_args()
 
-# Set environment
+#Set environment
 if args.mixed is True :
   MASK = torch.load(args.mask_load)
 else:
   MASK = None
 
-
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
-last_epoch = start_epoch + args.epoch
-
 
 # Data
 print('==> Preparing data..')
@@ -75,9 +69,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 
 # Model
 print('==> Building model..')
-
-
-# net = VGG('VGG9')
+net = QVGG('VGG19', num_bits=args.num_bits, mixed=args.mixed, mask=MASK, smooth_grad=args.smooth_grad)
 # net = ResNet18()
 # net = PreActResNet18()
 # net = GoogLeNet()
@@ -90,45 +82,25 @@ print('==> Building model..')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-net = QVGG('VGG9', num_bits=args.num_bits, mixed=args.mixed, mask=MASK)
-# net = QMobileNet(num_bits=args.num_bits)
-
-
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-print('---- checkpoint path')
-if not os.path.isdir('checkpoint'):
-    os.mkdir('checkpoint')
-
-# re-training
-if args.load_path is not None:
-  print('==> load from checkpoint...')
-  print('==> for retraining model..')
-  if device == 'cuda':
-    load_ckpt = torch.load(args.load_path)
-    if args.mixed is True:
-      start_epoch = load_ckpt['epoch']
-      best_acc = load_ckpt['acc']
-  else :
-    load_ckpt = torch.load(args.load_path, map_location=torch.device('cpu'))
-    ckpt2 = {}
-    for k, v in load_ckpt['net'].items():
-      if 'module' in k:
-        ckpt2[k[len('module.'):]] = v
-    load_ckpt = ckpt2
-
-  net.load_state_dict(load_ckpt, False)  
+if args.resume:
+    # Load checkpoint.
+    print('==> Resuming from checkpoint..')
+    assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
+    checkpoint = torch.load('./checkpoint/ckpt.pth')
+    net.load_state_dict(checkpoint['net'])
+    best_acc = checkpoint['acc']
+    start_epoch = checkpoint['epoch']
 
 criterion = nn.CrossEntropyLoss()
-
-optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
+optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150, 250, 350], gamma=0.1)
 
 
-#Training for tracking quantized bin change
 def track_train(epoch):
     net.train()
     train_loss = 0
@@ -150,20 +122,22 @@ def track_train(epoch):
         optimizer.zero_grad()
         outputs = net(inputs)
 
-        bwq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
+        with torch.no_grad():
+          bwq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
 
         loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
      
-        awq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
+        with torch.no_grad():
+          awq = dict([(k ,quantize(v, num_bits=4, dequantize=False)) for (k, v) in net.named_parameters() if len(v.size())!= 1])
+          check = dict([(k, abs(v-awq[k])) for k,v in bwq.items()])
+          accum_check = dict([(k, accum_check[k]+v) for k, v in  check.items()])
 
-        check = dict([(k, abs(v-awq[k])) for k,v in bwq.items()])
         train_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
-        accum_check = dict([(k, accum_check[k]+v) for k, v in  check.items()])
 
 
     track_name = save_path+'/track{}.pth' .format(epoch+1) 
@@ -175,59 +149,15 @@ def track_train(epoch):
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
-# Training for quantized model
-def qtrain(epoch):
-    net.train()
-    train_loss = 0
-    correct = 0
-    total = 0
-    
 
 
-    print('\nEpoch: {}  lr : {}' .format(epoch, optimizer.param_groups[0]['lr']))
-    print('Saving for tracking....')
-    save_path =  args.save_path + '/tracking'
-    if not os.path.isdir(args.save_path):
-        os.mkdir(args.save_path)
-    if not os.path.isdir(save_path):
-        os.mkdir(save_path)
-
-
-
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
-        optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-     
-        train_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
-
-        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        
-
-        save_name = save_path+'/iter{}.pth' .format((epoch+1)*batch_idx) 
-        torch.save(net.state_dict, save_name)
-   
-    
-
-
-# Training for normal 
+# Training
 def train(epoch):
+    print('\nEpoch: %d' % epoch)
     net.train()
     train_loss = 0
     correct = 0
     total = 0
-
-
-    print('\nEpoch: {}  lr : {:f}' .format(epoch+1, optimizer.param_groups[0]['lr']))
-
-
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
@@ -235,7 +165,6 @@ def train(epoch):
         loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
-     
 
         train_loss += loss.item()
         _, predicted = outputs.max(1)
@@ -244,8 +173,6 @@ def train(epoch):
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
-  
-              
 
 def test(epoch):
     global best_acc
@@ -267,55 +194,41 @@ def test(epoch):
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
-    # Save best accuracy model
+    # Save checkpoint.
     acc = 100.*correct/total
     if acc > best_acc:
         print('Saving..')
         state = {
             'net': net.state_dict(),
             'acc': acc,
-            'epoch': epoch+1,
+            'epoch': epoch,
         }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        
+        if epoch <= 150:
+          model_save_path = args.save_path + '/ckpt150.pth'
+          torch.save(state, model_save_path)         
+        elif epoch <= 250:
+          model_save_path = args.save_path + '/ckpt250.pth'
+          torch.save(state, model_save_path)
+        else:
+          model_save_path = args.save_path + '/ckpt350.pth'
+          torch.save(state, model_save_path)
+
         torch.save(state, './checkpoint/ckpt.pth')
         best_acc = acc
 
-    state_fg_path = 'epoch{}.pth' .format(epoch)
-    state_for_graph = { 'acc' : acc, 'loss' : loss }
-    torch.save(state_for_graph, './checkpoint/'+state_fg_path)
 
-
-
-
-if args.qtype == True:
-  print('qtrain mode')
-else:
-  print('normal train mode')
-
-if args.qtype == True :
-  for epoch in range(args.start, args.last):
+if args. qtype == True:
+  print('==> track bin change mode')
+  for epoch in range(start_epoch, start_epoch +args.epoch):
     track_train(epoch)
-    scheduler.step()
     test(epoch)
-  
-  accum_section_track(section=[args.start, args.last], load_path='./checkpoint/tracking')
-  for i in range(1,10):
-    make_mask(load_path='./checkpoint/tracking/'+'track_section'+str(args.start)+'_'+str(args.last), mixed_portion=0.1*i)
-
+    scheduler.step()
 else:
-  for epoch in range(start_epoch, last_epoch):
+  print('==> normal training')
+  for epoch in range(start_epoch, start_epoch+args.epoch):
     train(epoch)
-    
-    scheduler.step()
     test(epoch)
-
-   
-   
-   
-   
-   
-   
-   
-
-
-
-
+    scheduler.step()
