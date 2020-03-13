@@ -53,7 +53,7 @@ class QVGG(nn.Module):
           lmask = mask[len(mask)-1]
         else:
           lmask = None
-        print(lmask.size())
+          print(lmask.size())
         self.classifier = QLinear(512, 10, num_bits=self.num_bits, smooth_grad=self.smooth_grad, mixed=self.mixed, mask=lmask)
 
     def forward(self, x):
