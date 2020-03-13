@@ -45,7 +45,7 @@ class QBasicBlock(nn.Module):
         self.num_bits = num_bits
         self.mixed = mixed
         self.smooth_grad = smooth_grad
-        self.conv1 = QConv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, num_bits=num_bits)
+        self.conv1 = QConv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False, num_bits=num_bits, mixed=self.mixed, mask=None, smooth_grad=self.smooth_grad)
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = QConv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False, num_bits=num_bits)
         self.bn2 = nn.BatchNorm2d(planes)
@@ -204,8 +204,8 @@ class QResNet(nn.Module):
 def ResNet18():
     return ResNet(BasicBlock, [2,2,2,2])
 
-def QResNet18():
-    return QResNet(BasicBlock, [2,2,2,2], num_bits=4, mixed=False, smooth_grad=False)
+def QResNet18(num_bits, mixed, smooth_grad):
+    return QResNet(BasicBlock, [2,2,2,2], num_bits=num_bits, mixed=mixed, smooth_grad=smooth_grad)
 
 
 def ResNet34():
@@ -226,5 +226,4 @@ def test():
     y = net(torch.randn(1,3,32,32))
     print(y.size())
 
-test()
-
+#test()
