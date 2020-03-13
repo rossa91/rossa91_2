@@ -43,7 +43,7 @@ class MixedQuantize(InplaceFunction):
 
     @staticmethod
     def forward(ctx, input, num_bits=None, qparams=None, flatten_dims=_DEFAULT_FLATTEN,
-                reduce_dim=0, dequantize=True, signed=False, inplace=False, mask=None, smooth_grad=True):
+                reduce_dim=0, dequantize=True, signed=False, inplace=False, mask=None, smooth_grad=None):
 
         ctx.inplace = inplace
 
@@ -86,7 +86,7 @@ class MixedQuantize(InplaceFunction):
               
             ctx.smooth_grad = smooth_grad
             #for smoothing gradient noise
-            if smooth_grad is True:
+            if smooth_grad is not None:
               section = qparams.range / (2**(num_bits-1)) / 2
               distance = section - abs(output - input)
               ctx.section = section
@@ -98,12 +98,12 @@ class MixedQuantize(InplaceFunction):
     def backward(ctx, grad_output):
         # straight-through estimator
         smooth_grad = ctx.smooth_grad
-        if smooth_grad is None or smooth_grad is False :
+        if smooth_grad is None :
           grad_input = grad_output
         else:
           section = ctx.section
           distance = ctx.distance
-          grad_input = torch.where(distance < section * 0.2, grad_output*0.5, grad_output)
+          grad_input = torch.where(distance < section * 0.2, grad_output*smooth_grad, grad_output)
 #          print('section', section)
 #          print('distance', distance[0])
         return grad_input, None, None, None, None, None, None, None, None, None
