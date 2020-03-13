@@ -15,15 +15,9 @@ def accum_section_track(section, load_path):
     for k, v in track_load.items():
       accum_track[k] += v
   
-  save_path = load_path+'/track_section'+str(section[0])+'_'+str(section[1])
-  if not os.path.isdir(save_path):
-    os.mkdir(save_path)
   
   print(accum_track.keys())
-  torch.save(accum_track, save_path+'/track.pth')
-
-
-
+  return accum_track
 
 
 def make_mask_sub(tracked_bin, mixed_portion):
@@ -39,13 +33,16 @@ def make_mask_sub(tracked_bin, mixed_portion):
 
   return mask.reshape(size)
 
-def make_mask(load_path, mixed_portion):
-  bin_change = torch.load(load_path+'/track.pth')
+def make_mask(section, load_path):
+  bin_change = accum_section_track(section, load_path)
 
-  mask = dict([(k, make_mask_sub(v[1], mixed_portion)) for k, v in enumerate(bin_change.items())])
+  save_path = load_path+'/track_section'+str(section[0])+'_'+str(section[1])
+  if not os.path.isdir(save_path):
+    os.mkdir(save_path)
 
-
-  torch.save(mask, load_path+'/mask_'+str(mixed_portion)+'.pth')
+  for i in range(1, 10):
+    mixed_portion = 0.1*i
+    mask = dict([(k, make_mask_sub(v[1], mixed_portion)) for k, v in enumerate(bin_change.items())])
+    torch.save(mask, save_path+'/mask_{:.1f}.pth' .format(mixed_portion))
   print('Make mask..')
-  
 
