@@ -74,8 +74,8 @@ class MixedQuantize(InplaceFunction):
             
             # quantize
             weight.clamp_(qmin, qmax)
-            qw1 = weight.round_()
-            qw2 = weight.mul_(2.).round_().div_(2.)
+            qw1 = torch.round(weight)
+            qw2 = torch.round(2.*weight)/2.
 
             output = (1-mask) * qw1 + mask * qw2
            
