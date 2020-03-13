@@ -23,7 +23,7 @@ parser.add_argument('--epoch', default=350, type=int, help='epoch')
 
 #for quantization
 parser.add_argument('--num_bits', default=4, type=int, help='quantization bit width')
-parser.add_argument('--smooth_grad', default=False, type=bool, help='smooth gradient True or False')
+parser.add_argument('--smooth_grad', default=None, type=float, help='smooth gradient how much')
 
 #track train
 parser.add_argument('--qtype', default=False, type=bool, help='tracking bin change mode train or not')
@@ -35,6 +35,7 @@ parser.add_argument('--mask_load', default=None, type=str, help='To train mixed 
 
 args = parser.parse_args()
 
+print(args.smooth_grad)
 #Set environment
 if args.mixed is True :
   MASK = torch.load(args.mask_load)
