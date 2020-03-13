@@ -205,8 +205,8 @@ class QLinear(nn.Linear):
     def __init__(self, in_features, out_features, bias=True, num_bits=8, num_bits_weight=8, mixed=False, mask=None, smooth_grad=False):
         super(QLinear, self).__init__(in_features, out_features, bias)
         self.num_bits = num_bits
-        self.mixed = mixed
         self.mask = mask
+        self.mixed = mixed
         self.smooth_grad = smooth_grad
         self.num_bits_weight = num_bits_weight or num_bits
         self.quantize_input = QuantMeasure(self.num_bits)
@@ -216,20 +216,21 @@ class QLinear(nn.Linear):
         weight_qparams = calculate_qparams(
             self.weight, num_bits=self.num_bits_weight, flatten_dims=(1, -1), reduce_dim=None)
         
-        if self.mixed is False:
-          mask = None
-        else:
+        if self.mixed is True:
           mask = self.mask
-
+        else:
+          mask = None
+        
         qweight = quantize(self.weight, qparams=weight_qparams, smooth_grad=self.smooth_grad, mask=mask)
+        
         if self.bias is not None:
             qbias = quantize(
                 self.bias, num_bits=self.num_bits_weight + self.num_bits,
                 flatten_dims=(0, -1))
         else:
             qbias = self.bias
-
-
+        
+        
         output = F.linear(qinput, qweight, qbias)
 
         return output
